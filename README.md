@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎬 DAMFlix · Parte 3
+# 🎬 DAMFlix · Parte 4
 
 **Aplicación Android para almacenar y consultar películas**
 
@@ -11,7 +11,7 @@
 
 **Módulo:** Programación Multimedia y Dispositivos Móviles  
 **Unidad de Trabajo Nº2:** Desarrollo de aplicaciones Android  
-**Parte 3 · Actividad 3:** Catálogo Dinámico  
+**Parte 4 · Actividad 4:** Navegación  
 
 2º DAM · CIFP Villa de Agüimes
 
@@ -21,117 +21,152 @@
 
 ## 🎯 Objetivo
 
-Convertir los datos de las películas en una lista scrollable altamente optimizada, utilizando la estructura de componentes de **Material Design 3**.
+Conectar las pantallas desarrolladas en las fases previas mediante el componente oficial de navegación de **Jetpack Compose**.
 
 ## ✅ Requisitos funcionales
 
 | Requisito | Cómo se cumple |
 |---|---|
-| **1. Estructura Scaffold** | La pantalla `PantallaCatalogoDAMFlix()` está dentro de un `Scaffold` con una `TopAppBar` ("DAMFlix - Catálogo") |
-| **2. Catálogo dinámico** | Las 15 películas se muestran con un `LazyColumn` scrollable, una `Card` por película |
-| **3. Acción interactiva** | Cada tarjeta tiene un `IconButton` con icono de corazón para marcar o desmarcar la película como favorita, y la tarjeta se recompone al instante |
-| **4. Optimizaciones** | Se asigna una clave única a cada elemento con `key = { p -> p.id }` en `items()` |
+| **1. Configuración del grafo de navegación** | Se implementan `NavHost` y `NavController`, y las rutas se centralizan en una `sealed class Ruta` |
+| **2. Navegación entre las pantallas realizadas** | Se navega entre el formulario, el catálogo y la página de información de la aplicación |
+| **3. Utilización de un BottomBar** | Una `NavigationBar` en el `bottomBar` del `Scaffold` permite cambiar de pantalla |
 
 ## ⚙️ Funcionamiento
 
-### Modelo de datos
+### Dependencia de navegación
 
-Cada película es un objeto `Pelicula` con un identificador, un título y un estado de favorita:
+En `app/build.gradle.kts`, dentro de `dependencies`:
 
 ```kotlin
-class Pelicula(val id: Int, val titulo: String) {
-    var esFavorita by mutableStateOf(false)
+implementation("androidx.navigation:navigation-compose:2.10.2")
+```
+
+### Rutas con una sealed class
+
+Cada destino de la barra inferior tiene una ruta (`path`), una etiqueta (`label`) y un icono (`icon`):
+
+```kotlin
+sealed class Ruta(val path: String, val label: String, val icon: ImageVector) {
+    object Inicio : Ruta(path = "inicio", label = "Inicio", icon = Icons.Filled.Home)
+    object Listado : Ruta(path = "listado", label = "Listado", icon = Icons.Filled.List)
+    object Formulario : Ruta(path = "alta", label = "Añadir", icon = Icons.Filled.Add)
 }
 ```
 
-`esFavorita` es un estado de Compose: cuando cambia, las tarjetas que lo leen se recomponen.
+### Scaffold con TopAppBar y BottomBar
 
-### Scaffold y TopAppBar
+La pantalla principal, `PantallaCatalogoDAMFlix()`, crea el `NavController` y observa la ruta activa:
 
 ```kotlin
-Scaffold(
-    topBar = {
-        TopAppBar(
-            title = { Text("DAMFlix - Catálogo") },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            )
+val navController = rememberNavController()
+val navBackStackEntry by navController.currentBackStackEntryAsState()
+val rutaActual = navBackStackEntry?.destination?.route
+```
+
+La barra inferior marca la pestaña seleccionada y navega al pulsar:
+
+```kotlin
+NavigationBar {
+    listOf(Ruta.Inicio, Ruta.Listado, Ruta.Formulario).forEach { ruta ->
+        NavigationBarItem(
+            selected = rutaActual == ruta.path,
+            onClick = {
+                if (rutaActual != ruta.path) {
+                    navController.navigate(ruta.path) {
+                        popUpTo(navController.graph.startDestinationId) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
+            },
+            icon = { Icon(ruta.icon, contentDescription = ruta.label) },
+            label = { Text(ruta.label) }
         )
     }
-) { innerPadding ->
-    Box(modifier = Modifier.padding(innerPadding)) {
-        // ListaPeliculas(...)
-    }
 }
 ```
 
-El `innerPadding` evita que la lista quede tapada por la barra superior.
+- `popUpTo(...) { saveState = true }`: limpia la pila hasta el destino raíz y conserva el estado de la pantalla anterior.
+- `launchSingleTop = true`: evita apilar varias copias de la misma pantalla.
+- `restoreState = true`: restaura el estado al volver a una pestaña ya visitada.
 
-### LazyColumn con claves
+### Título que cambia según la pantalla
+
+La barra superior muestra un título distinto en cada pantalla:
 
 ```kotlin
-LazyColumn(
-    contentPadding = PaddingValues(16.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp)
+val titulo = when (rutaActual) {
+    Ruta.Listado.path -> "Catálogo"
+    Ruta.Formulario.path -> "Formulario"
+    else -> "Información de la Aplicación"
+}
+```
+
+### NavHost
+
+El `NavHost` recibe el `innerPadding` del `Scaffold` para que las pantallas no queden tapadas por las barras:
+
+```kotlin
+NavHost(
+    navController = navController,
+    startDestination = Ruta.Inicio.path,
+    modifier = Modifier.padding(innerPadding)
 ) {
-    items(items = peliculas, key = { p -> p.id }) { pelicula ->
-        // Card con el título y el IconButton
+    composable(Ruta.Inicio.path) { PantallaInicio() }
+    composable(Ruta.Listado.path) {
+        ListaPeliculas(
+            peliculas = peliculas,
+            onToggleFavorito = { id ->
+                val pelicula = peliculas.first { it.id == id }
+                pelicula.esFavorita = !pelicula.esFavorita
+            }
+        )
     }
+    composable(Ruta.Formulario.path) { FormularioPelicula() }
 }
 ```
 
-`LazyColumn` solo dibuja los elementos visibles en pantalla. La `key` permite a Compose identificar cada película, aunque cambie el orden o el contenido de la lista.
+### Pantallas
 
-### Botón de favorito
+| Pantalla | Ruta | Contenido |
+|---|---|---|
+| **Inicio** | `inicio` | Página de información de la aplicación: el perfil de usuario (Actividad 1) |
+| **Listado** | `listado` | Catálogo de 15 películas con `LazyColumn` y corazón de favorita (Actividad 3) |
+| **Añadir** | `alta` | Formulario de alta de película con validación (Actividad 2) |
 
-```kotlin
-IconButton(onClick = { onToggleFavorito(pelicula.id) }) {
-    Icon(
-        imageVector = if (pelicula.esFavorita) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-        contentDescription = "Favorito",
-        tint = if (pelicula.esFavorita) Color.Red else Color.Gray
-    )
-}
-```
-
-- Película favorita: corazón relleno y rojo.
-- Película no favorita: corazón vacío y gris.
-
-Al pulsar el botón, la pantalla busca la película por su `id` y cambia su estado:
-
-```kotlin
-val pelicula = peliculas.first { it.id == id }
-pelicula.esFavorita = !pelicula.esFavorita
-```
-
-> En `ListaPeliculas` están comentados `PerfilUsuario()` y `FormularioPelicula()`, porque son de las partes 1 y 2 y esta actividad no los pide. Las funciones siguen en `MainActivity.kt`.
+La lista de películas se crea con `remember` fuera del `NavHost`, por eso los favoritos se conservan al cambiar de pantalla.
 
 ## 🗂️ Estructura
 
 ```
 app/src/main
 ├── java/com/example/damflix
-│   └── MainActivity.kt        # PantallaCatalogoDAMFlix, ListaPeliculas, Pelicula
-│                              # (más el perfil y el formulario de las partes 1 y 2)
+│   ├── MainActivity.kt        # PantallaCatalogoDAMFlix: Scaffold, BottomBar y NavHost
+│   ├── Ruta.kt                # sealed class Ruta con las rutas de la BottomBar
+│   ├── Pantallas.kt           # PantallaInicio, FormularioPelicula y PerfilUsuario
+│   └── Peliculas.kt           # clase Pelicula y ListaPeliculas
 └── res
     └── values
         └── strings.xml        # Textos del perfil y del formulario
 ```
 
-## 🧪 Cómo probar el catálogo
+## 🧪 Cómo probar la navegación
 
-1. Al abrir la app se ve la barra superior "DAMFlix - Catálogo" y la lista de 15 películas de ejemplo.
-2. Todos los corazones empiezan vacíos y grises.
-3. Pulsa el corazón de una película: se pone rojo y relleno al momento.
-4. Púlsalo otra vez: vuelve a gris.
-5. Desliza la lista hacia arriba: como las 15 películas no caben en pantalla, se desplaza hasta "Toy Story".
-6. Marca un favorito, desplázate y vuelve: el corazón sigue rojo, porque cada película conserva su estado.
+1. Al abrir la app se ve la pantalla "Inicio" con el perfil de usuario, y el título de la barra superior es "Información de la Aplicación".
+2. Pulsa "Listado" en la barra inferior: aparece el catálogo y el título cambia a "Catálogo".
+3. Pulsa el corazón de una película: se pone rojo. Púlsalo otra vez y vuelve a gris.
+4. Pulsa "Añadir": aparece el formulario y el título cambia a "Formulario".
+5. Escribe un título y un director: el botón "Guardar Película" se activa.
+6. Vuelve a "Listado": el corazón que marcaste sigue rojo.
+7. Pulsa varias veces el mismo botón de la barra: no se apilan pantallas repetidas.
 
 ## 🚀 Cómo ejecutarlo
 
 1. Clona el repositorio:
 ```bash
-git clone https://github.com/ivanhernandezbetancor/DAMFlix-PARTE-3.git
+git clone https://github.com/ivanhernandezbetancor/DAMflix_PARTE_4.git
 ```
 2. Ábrelo con **Android Studio**.
 3. Espera a que termine la sincronización de Gradle.
@@ -142,10 +177,18 @@ git clone https://github.com/ivanhernandezbetancor/DAMFlix-PARTE-3.git
 - Kotlin
 - Jetpack Compose
 - Material 3
+- Navigation Compose
 
-### Dependencia necesaria
+### Dependencias necesarias
 
-Los iconos `Favorite` y `FavoriteBorder` requieren esta línea en `dependencies` de `app/build.gradle.kts`:
+En `dependencies` de `app/build.gradle.kts`:
+
+```kotlin
+implementation("androidx.navigation:navigation-compose:2.10.2")
+implementation("androidx.compose.material:material-icons-core")
+```
+
+La segunda línea es necesaria para los iconos `Favorite` y `FavoriteBorder`.
 
 ```kotlin
 implementation("androidx.compose.material:material-icons-core")
